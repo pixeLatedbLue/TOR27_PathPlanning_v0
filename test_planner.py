@@ -1,11 +1,3 @@
-"""
-Regression tests for the path-planning pipeline.
-
-These run headless (no UI, no pygame) so CI stays simple. They cover the
-planner, the perception/mapping/AS-state building blocks, and one full
-end-to-end mission per planning style.
-"""
-
 import unittest
 
 import numpy as np
@@ -24,9 +16,6 @@ from tracks import (build_track, make_loop_track, make_skidpad,
 from vehicle import EBS_DECEL
 
 
-# --------------------------------------------------------------------------
-# planner (geometry / racing line)
-# --------------------------------------------------------------------------
 class PlannerTests(unittest.TestCase):
     def test_finish_mapping_returns_racing_outputs(self):
         center, left, right = make_loop_track()
@@ -90,9 +79,6 @@ class PlannerTests(unittest.TestCase):
                                  2.0 * 6.0 * ds[i] + 1e-6)
 
 
-# --------------------------------------------------------------------------
-# perception + mapping
-# --------------------------------------------------------------------------
 class PerceptionMappingTests(unittest.TestCase):
     def test_perception_respects_range_and_fov(self):
         track = build_track(AUTOCROSS)
@@ -101,8 +87,8 @@ class PerceptionMappingTests(unittest.TestCase):
         dets = per.sense(track.start_pose)
         self.assertTrue(len(dets) > 0)
         for d in dets:
-            self.assertLessEqual(np.hypot(*d.xy), 14.0 + 1e-6)   # within range
-            self.assertGreaterEqual(d.xy[0], -1e-6)              # forward (FOV 180)
+            self.assertLessEqual(np.hypot(*d.xy), 14.0 + 1e-6)
+            self.assertGreaterEqual(d.xy[0], -1e-6)
 
     def test_conemap_dedupes_repeated_detections(self):
         cmap = ConeMap(start_pose=(0.0, 0.0, 0.0), assoc_radius=1.0)
@@ -114,9 +100,6 @@ class PerceptionMappingTests(unittest.TestCase):
         self.assertEqual(len(cmap.right_cones()), 1)
 
 
-# --------------------------------------------------------------------------
-# autonomous system state machine (rules T14.8)
-# --------------------------------------------------------------------------
 class AutonomousSystemTests(unittest.TestCase):
     def test_ready_then_drive_respects_five_second_hold(self):
         a = AutonomousSystem()
@@ -126,11 +109,11 @@ class AutonomousSystemTests(unittest.TestCase):
         self.assertEqual(a.state, AS_READY)
         a.press_go()
         a.update(0.1)
-        self.assertEqual(a.state, AS_READY)        # < 5 s in ready -> no R2D yet
+        self.assertEqual(a.state, AS_READY)
         for _ in range(60):
             a.update(0.1)
-        self.assertEqual(a.state, AS_DRIVING)      # > 5 s -> R2D granted
-        self.assertFalse(a.motion_allowed)         # but 3 s driving hold first
+        self.assertEqual(a.state, AS_DRIVING)
+        self.assertFalse(a.motion_allowed)
         for _ in range(40):
             a.update(0.1)
         self.assertTrue(a.motion_allowed)
@@ -150,9 +133,6 @@ class AutonomousSystemTests(unittest.TestCase):
         self.assertEqual(a.state, AS_OFF)
 
 
-# --------------------------------------------------------------------------
-# end-to-end: each planning style completes its mission
-# --------------------------------------------------------------------------
 class MissionTests(unittest.TestCase):
     def _arm_and_launch(self, sim):
         sim.set_asms(True)
@@ -182,7 +162,7 @@ class MissionTests(unittest.TestCase):
     def test_autocross_explores_then_races_and_finishes(self):
         sim = self._run(AUTOCROSS, 6000)
         self.assertEqual(sim.AS.state, AS_FINISHED)
-        self.assertIsNotNone(sim.race)             # raceline was computed
+        self.assertIsNotNone(sim.race)
         self.assertGreaterEqual(sim.lap, 2)
 
     def test_skidpad_finishes_four_loops(self):
@@ -195,18 +175,16 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(sim.AS.state, AS_FINISHED)
 
     def test_ebs_test_finishes_and_meets_decel_target(self):
-        # the EBS-test mission fires the brake itself, stops, then finishes.
         sim = self._run(EBS_TEST, 3000)
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertTrue(sim.vehicle.is_stopped())
-        self.assertGreater(sim.ebs_decel, 10.0)     # rules T15.4.2: > 10 m/s^2
+        self.assertGreater(sim.ebs_decel, 10.0)
 
     def test_emergency_mid_drive_stops_the_car_hard(self):
-        # press EMERGENCY while racing and confirm a hard, rules-compliant stop.
         sim = Simulation(dt=0.04)
         sim.select_mission(AUTOCROSS)
         self._arm_and_launch(sim)
-        for _ in range(400):                        # build up some speed
+        for _ in range(400):
             sim.tick()
             if sim.vehicle.v > 3.0:
                 break
@@ -216,7 +194,7 @@ class MissionTests(unittest.TestCase):
             sim.tick()
             if sim.vehicle.is_stopped():
                 break
-        self.assertEqual(sim.AS.state, AS_EMERGENCY)   # e-stop is not "finished"
+        self.assertEqual(sim.AS.state, AS_EMERGENCY)
         self.assertTrue(sim.vehicle.is_stopped())
         self.assertGreater(sim.ebs_decel, 10.0)
         self.assertLessEqual(sim.ebs_decel, EBS_DECEL + 1e-6)

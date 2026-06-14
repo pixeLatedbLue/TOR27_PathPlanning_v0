@@ -1,15 +1,7 @@
-"""
-Shared geometry helpers, used by both planning modes.
-
-Nothing here knows about racing or cones specifically -- these are just small,
-reusable operations on arrays of (x, y) points.
-"""
-
 import numpy as np
 
 
 def as_points(points, name="points", min_points=0):
-    """Return a validated Nx2 float array."""
     arr = np.asarray(points, float)
     if arr.size == 0:
         arr = np.zeros((0, 2), dtype=float)
@@ -27,13 +19,11 @@ def as_points(points, name="points", min_points=0):
 
 
 def unit(v):
-    """Return v scaled to length 1 (or v unchanged if it's ~zero)."""
     n = np.linalg.norm(v)
     return v / n if n > 1e-12 else v
 
 
 def remove_duplicates(points, tolerance=0.01):
-    """Drop points that sit almost on top of each other."""
     kept = []
     for p in points:
         if all(np.linalg.norm(p - q) > tolerance for q in kept):
@@ -42,8 +32,6 @@ def remove_duplicates(points, tolerance=0.01):
 
 
 def normals_of_loop(points):
-    """Unit 'sideways' vector (perpendicular to travel) at each point of a
-    closed loop."""
     ahead = np.roll(points, -1, axis=0)
     behind = np.roll(points, 1, axis=0)
     travel = ahead - behind
@@ -52,7 +40,6 @@ def normals_of_loop(points):
 
 
 def smooth_loop(points, window):
-    """Moving average around a closed loop, to take out the zig-zag."""
     if window < 2 or len(points) < window:
         return points
     n = len(points)
@@ -65,11 +52,10 @@ def smooth_loop(points, window):
 
 
 def resample_loop(points, n_points):
-    """Place n_points equally spaced (by arc length) around a closed loop."""
     loop = np.vstack([points, points[0]])
     step = np.linalg.norm(np.diff(loop, axis=0), axis=1)
     distance = np.concatenate([[0.0], np.cumsum(step)])
-    if distance[-1] < 1e-9:                       # all points coincide
+    if distance[-1] < 1e-9:
         base = points[0] if len(points) else np.zeros(2)
         return np.repeat(np.asarray(base, float)[None, :], n_points, axis=0)
     wanted = np.linspace(0.0, distance[-1], n_points, endpoint=False)
@@ -79,18 +65,12 @@ def resample_loop(points, n_points):
 
 
 def curvature_along(points, closed=False):
-    """|curvature| at each point of a line.
-
-    For a closed loop pass ``closed=True``: the derivatives are then taken with
-    a wrap-around (periodic) stencil so the start/finish point is treated the
-    same as every other point. Open paths keep numpy's one-sided ends.
-    """
     pts = np.asarray(points, float)
     if closed and len(pts) >= 3:
         ahead = np.roll(pts, -1, axis=0)
         behind = np.roll(pts, 1, axis=0)
-        d1 = (ahead - behind) / 2.0          # central first difference (wrapped)
-        d2 = ahead - 2.0 * pts + behind      # central second difference (wrapped)
+        d1 = (ahead - behind) / 2.0
+        d2 = ahead - 2.0 * pts + behind
         dx, dy = d1[:, 0], d1[:, 1]
         ddx, ddy = d2[:, 0], d2[:, 1]
     else:
@@ -115,13 +95,6 @@ def _side_distance(point, normal, tangent, cones, fallback, tangent_window):
 
 
 def boundary_halfwidths(centerline, left_cones, right_cones, fallback_width=3.0):
-    """Estimate left/right clearance by projecting cones onto local normals.
-
-    The old nearest-cone estimate is useful as a conservative fallback, but it
-    cannot tell which boundary a cone belongs to. This keeps the side labels in
-    the calculation and returns an effective half-width for each centerline
-    point.
-    """
     line = as_points(centerline, "centerline", min_points=3)
     left = as_points(left_cones, "left_cones")
     right = as_points(right_cones, "right_cones")
@@ -129,8 +102,6 @@ def boundary_halfwidths(centerline, left_cones, right_cones, fallback_width=3.0)
     tangents = np.column_stack([normals[:, 1], -normals[:, 0]])
     nearest = nearest_cone_halfwidth(line, left, right)
 
-    # A loop may be ordered clockwise or counterclockwise. Pick the normal sign
-    # that puts left cones mostly on +normal and right cones mostly on -normal.
     votes = []
     if len(left) and len(right):
         for i, point in enumerate(line):
@@ -161,10 +132,6 @@ def boundary_halfwidths(centerline, left_cones, right_cones, fallback_width=3.0)
 
 
 def nearest_cone_halfwidth(centerline, left_cones, right_cones):
-    """Approximate track half-width at each centerline point as the distance
-    to the nearest cone. (Conservative near a figure-8 crossing, where a cone
-    from the other arm is close -- which keeps the line near the middle there.)
-    """
     centerline = as_points(centerline, "centerline", min_points=1)
     left = as_points(left_cones, "left_cones")
     right = as_points(right_cones, "right_cones")
@@ -177,13 +144,8 @@ def nearest_cone_halfwidth(centerline, left_cones, right_cones):
 
 def speed_profile_from_curvature(points, mu=1.2, g=9.81, max_speed=18.0,
                                  min_speed=3.0, max_accel=4.0, max_decel=6.0):
-    """Simple curvature-limited speed target in m/s.
-
-    This is not a full lap-time optimizer, but it gives the controller a useful
-    first speed profile: high speed on straights, capped speed in tight bends.
-    """
     pts = as_points(points, "points", min_points=2)
-    curv = curvature_along(pts, closed=True)   # speed profile wraps the loop below
+    curv = curvature_along(pts, closed=True)
     speed = np.sqrt(mu * g / np.maximum(curv, 1e-4))
     speed = np.clip(speed, min_speed, max_speed)
 

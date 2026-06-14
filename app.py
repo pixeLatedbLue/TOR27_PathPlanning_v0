@@ -1,25 +1,3 @@
-"""
-Real-time visualiser for the driverless path-planning pipeline.
-
-Run it:
-
-    python app.py
-
-What you see, live:
-    * cones streaming in from "perception" (sensor wedge + rays to each cone),
-    * those detections being folded into the growing global map,
-    * the planner's output drawn on the map -- the reactive local path while
-      EXPLORING, then the minimum-curvature raceline while RACING,
-    * the car (sprite "TOR" if you drop one in, else a drawn car) following it,
-    * the Autonomous System state, ASSI indicator and telemetry (rules T14/T15).
-
-Controls (buttons on the right, or keys):
-    pick a mission (top bar) -> ASMS ON -> GO        keys: 1-7, A, G
-    EMERGENCY fires the EBS safe-stop                key: E
-    RESET re-arms the current mission                key: R
-    pause / fast-forward                             keys: P, +/-
-"""
-
 import os
 import numpy as np
 import pygame
@@ -30,7 +8,6 @@ from autonomous_system import (AS_OFF, AS_READY, AS_DRIVING, AS_EMERGENCY,
 from tracks import (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE, INSPECTION,
                     EBS_TEST, MANUAL)
 
-# ---- layout --------------------------------------------------------------
 WIDTH, HEIGHT = 1280, 820
 TOPBAR_H = 48
 PANEL_W = 300
@@ -38,7 +15,6 @@ MAP_RECT = pygame.Rect(0, TOPBAR_H, WIDTH - PANEL_W, HEIGHT - TOPBAR_H)
 PANEL_RECT = pygame.Rect(WIDTH - PANEL_W, TOPBAR_H, PANEL_W, HEIGHT - TOPBAR_H)
 FPS = 60
 
-# ---- colours -------------------------------------------------------------
 BG = (18, 20, 26)
 PANEL = (28, 31, 40)
 TOPBAR = (24, 27, 35)
@@ -68,16 +44,13 @@ STATE_COLOR = {AS_OFF: DIM, AS_READY: WARN, AS_DRIVING: GOOD,
                AS_EMERGENCY: BAD, AS_FINISHED: ACCENT}
 
 
-# --------------------------------------------------------------------------
-# small button helper
-# --------------------------------------------------------------------------
 class Button:
     def __init__(self, rect, label, on_click, kind="action"):
         self.rect = pygame.Rect(rect)
         self.label = label
         self.on_click = on_click
-        self.kind = kind            # action / mission / toggle
-        self.active = False         # highlighted (selected mission / toggle on)
+        self.kind = kind
+        self.active = False
 
     def draw(self, surf, font):
         base = PANEL
@@ -101,9 +74,6 @@ class Button:
         return False
 
 
-# --------------------------------------------------------------------------
-# car sprite: use an image whose name is "TOR" if present, else draw one
-# --------------------------------------------------------------------------
 def load_car_sprite():
     here = os.path.dirname(os.path.abspath(__file__))
     for folder in (here, os.path.join(here, "assets")):
@@ -118,14 +88,12 @@ def load_car_sprite():
 
 
 def draw_vector_car(length_px, width_px):
-    """Fallback top-down formula car if no TOR image is supplied."""
     s = pygame.Surface((length_px, width_px), pygame.SRCALPHA)
     L, W = length_px, width_px
     body = [(L * 0.04, W * 0.40), (L * 0.62, W * 0.30), (L * 0.96, W * 0.42),
             (L * 0.96, W * 0.58), (L * 0.62, W * 0.70), (L * 0.04, W * 0.60)]
     pygame.draw.polygon(s, (40, 44, 54), body)
     pygame.draw.polygon(s, CAR, body, width=2)
-    # nose cone + cockpit
     pygame.draw.polygon(s, ACCENT, [(L * 0.96, W * 0.45), (L * 1.0, W * 0.5),
                                     (L * 0.96, W * 0.55)])
     pygame.draw.circle(s, (20, 22, 28), (int(L * 0.45), int(W * 0.5)), int(W * 0.13))
@@ -137,9 +105,6 @@ def draw_vector_car(length_px, width_px):
     return s
 
 
-# --------------------------------------------------------------------------
-# world <-> screen
-# --------------------------------------------------------------------------
 class View:
     def __init__(self, track):
         pts = [track.left, track.right, track.centerline]
@@ -149,7 +114,6 @@ class View:
         hi = allp.max(axis=0) + 6.0
         span = np.maximum(hi - lo, 1.0)
         self.scale = min(MAP_RECT.width / span[0], MAP_RECT.height / span[1])
-        # centre the track in the map rect
         self.cx, self.cy = (lo + hi) / 2.0
         self.lo, self.hi = lo, hi
 
@@ -159,17 +123,12 @@ class View:
         return int(x), int(y)
 
 
-# --------------------------------------------------------------------------
-# the app
-# --------------------------------------------------------------------------
 class App:
     def __init__(self):
         pygame.init()
         pygame.display.set_caption("FSD Path Planning -- live pipeline")
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
-        # a comma-separated list: pygame picks the first font available, so the
-        # UI looks the same on Windows (Consolas) and on Linux/Jetson (DejaVu).
         mono = "consolas,dejavusansmono,liberationmono,freemono,monospace"
         self.font = pygame.font.SysFont(mono, 16)
         self.font_s = pygame.font.SysFont(mono, 13)
@@ -185,7 +144,6 @@ class App:
         self.buttons = []
         self._build_buttons()
 
-    # ---- buttons ----------------------------------------------------------
     def _build_buttons(self):
         self.buttons.clear()
         n = len(MISSIONS)
@@ -212,7 +170,6 @@ class App:
         self.buttons += [self.btn_asms, self.btn_go, self.btn_stop,
                          self.btn_reset, self.btn_pause, self.btn_speed]
 
-    # ---- actions ----------------------------------------------------------
     def choose_mission(self, mission):
         self.sim.select_mission(mission)
         self.view = View(self.sim.track)
@@ -253,7 +210,6 @@ class App:
         self.time_scale = order[(order.index(self.time_scale) + 1) % len(order)]
         self.btn_speed.label = f"x{self.time_scale}"
 
-    # ---- event loop -------------------------------------------------------
     def run(self):
         running = True
         while running:
@@ -297,7 +253,6 @@ class App:
             if len(self.trail) > 1500:
                 self.trail.pop(0)
 
-    # ---- drawing ----------------------------------------------------------
     def draw(self):
         self.screen.fill(BG)
         snap = self.sim.snapshot()
@@ -313,13 +268,11 @@ class App:
         track = snap["track"]
         w2s = self.view.w2s
 
-        # ground-truth cones, faint -- the part of the track not yet discovered
         for c in track.left:
             pygame.draw.circle(self.screen, GT_FAINT, w2s(c), 3, 1)
         for c in track.right:
             pygame.draw.circle(self.screen, GT_FAINT, w2s(c), 3, 1)
 
-        # planner output ----------------------------------------------------
         race = snap["race"]
         if race is not None:
             cl = np.vstack([race["centerline"], race["centerline"][0]])
@@ -336,12 +289,10 @@ class App:
         if lp is not None and len(lp) > 1 and race is None:
             pygame.draw.lines(self.screen, LOCALP, False, [w2s(p) for p in lp], 3)
 
-        # trail -------------------------------------------------------------
         if len(self.trail) > 1:
             pygame.draw.lines(self.screen, (70, 90, 120), False,
                               [w2s(p) for p in self.trail], 2)
 
-        # mapped cones (the live dataset) -----------------------------------
         for c in snap["map_left"]:
             pygame.draw.circle(self.screen, BLUE, w2s(c), 4)
         for c in snap["map_right"]:
@@ -353,7 +304,6 @@ class App:
 
     def _draw_grid(self):
         step = max(5.0, round(10.0))
-        # light grid every ~10 m
         x = self.view.lo[0]
         while x <= self.view.hi[0]:
             p1 = self.view.w2s((x, self.view.lo[1]))
@@ -378,7 +328,6 @@ class App:
         car_s = self.view.w2s((px, py))
         rng = self.sim.perception.max_range
         half = self.sim.perception.half_fov
-        # FOV wedge
         wedge = [car_s]
         for a in np.linspace(-half, half, 24):
             wp = (px + rng * np.cos(theta + a), py + rng * np.sin(theta + a))
@@ -387,7 +336,6 @@ class App:
         off = [(p[0] - MAP_RECT.x, p[1] - MAP_RECT.y) for p in wedge]
         pygame.draw.polygon(fov, (90, 150, 230, 22), off)
         self.screen.blit(fov, MAP_RECT.topleft)
-        # rays + rings to the cones detected this tick
         for local, col in ((snap["det_left_local"], BLUE),
                            (snap["det_right_local"], YELLOW)):
             world = local_to_world(local, pose)
@@ -409,26 +357,22 @@ class App:
         rot = pygame.transform.rotate(base, np.degrees(theta))
         self.screen.blit(rot, rot.get_rect(center=self.view.w2s((px, py))))
 
-    # ---- top bar ----------------------------------------------------------
     def _draw_topbar(self):
         pygame.draw.rect(self.screen, TOPBAR, (0, 0, WIDTH, TOPBAR_H))
         for b in self.mission_buttons:
             b.draw(self.screen, self.font_s)
 
-    # ---- side panel -------------------------------------------------------
     def _draw_panel(self, snap):
         pygame.draw.rect(self.screen, PANEL, PANEL_RECT)
         x = PANEL_RECT.x + 16
         y = PANEL_RECT.y + 14
 
-        # AS state
         state = snap["state"]
         self.screen.blit(self.font_s.render("AUTONOMOUS SYSTEM", True, DIM), (x, y))
         y += 20
         self.screen.blit(self.font_b.render(state, True, STATE_COLOR[state]), (x, y))
         y += 34
 
-        # ASSI lamps
         color, blink = snap["assi"]
         on = (pygame.time.get_ticks() // 250) % 2 == 0 if blink else True
         lit = ASSI_COLORS[color] if on else (40, 42, 50)
@@ -439,14 +383,12 @@ class App:
             pygame.draw.circle(self.screen, (15, 16, 20), c, 11, 2)
         y += 42
 
-        # AMI / mission
         ami = dict(MISSIONS).get(snap["mission"], snap["mission"]).upper()
         self._row(x, y, "AMI / MISSION", ami); y += 24
         self._row(x, y, "PHASE", snap["phase"].upper()); y += 24
         asms = "ON" if snap["asms"] else "OFF"
         self._row(x, y, "ASMS", asms, GOOD if snap["asms"] else DIM); y += 24
 
-        # telemetry
         y += 6
         pygame.draw.line(self.screen, GRID, (x, y), (PANEL_RECT.right - 16, y)); y += 10
         self._row(x, y, "SPEED", f"{snap['speed']:5.1f} m/s"); y += 24
@@ -458,7 +400,6 @@ class App:
             self._row(x, y, "EBS DECEL", f"{snap['ebs_decel']:4.1f} m/s2",
                       GOOD if snap['ebs_decel'] > 10 else WARN); y += 24
 
-        # message line
         y += 6
         pygame.draw.line(self.screen, GRID, (x, y), (PANEL_RECT.right - 16, y)); y += 8
         self._wrap(x, y, snap["message"], PANEL_W - 32)

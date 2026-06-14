@@ -1,13 +1,3 @@
-"""
-Racing mode: the minimum-curvature line for one closed loop.
-
-Slides each centerline point sideways to make the line bend as little as
-possible while staying inside the cones. Used on the main loop of a
-trackdrive / autocross track. (For skidpad the "fast line" is following each
-circle at the grip limit, which needs the vehicle model -- deferred -- so
-there we just keep the circle centrelines.)
-"""
-
 import numpy as np
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
@@ -63,7 +53,7 @@ def find_apexes(raceline, min_gap=12, height_fraction=0.4):
     curv = curvature_along(raceline, closed=True)
     if curv.max() <= 1e-12:
         return np.array([], dtype=int)
-    wrapped = np.concatenate([curv, curv[:min_gap]])     # wrap the seam
+    wrapped = np.concatenate([curv, curv[:min_gap]])
     peaks, _ = find_peaks(wrapped, distance=min_gap,
                           height=height_fraction * curv.max())
     return np.unique(peaks % len(curv))

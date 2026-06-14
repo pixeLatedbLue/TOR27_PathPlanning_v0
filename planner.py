@@ -1,18 +1,3 @@
-"""
-The two-mode planner.
-
-    EXPLORATION : while SLAM is still building the map, call explore() each tick
-                  with the cones currently visible (car's local frame). It
-                  returns a short path ahead for the controller to follow.
-
-    -> finish_mapping() once SLAM reports the map is complete. It computes the
-       global centreline(s) and the racing line, and switches to racing mode.
-
-    RACING      : call race() to get the racing line for the controller.
-
-This object is the only thing the rest of the car needs to talk to.
-"""
-
 import numpy as np
 
 from centerline import global_centerline, local_centerline
@@ -40,13 +25,11 @@ class Planner:
         self.min_speed = min_speed
         self.mu = mu
         self.mode = "exploration"
-        self.result = None            # cached racing result once mapping is done
+        self.result = None
         self._previous_local_path = None
 
-    # ---- exploration mode -------------------------------------------------
     def explore(self, left_visible, right_visible, look_ahead=15.0, smoothing=0.0,
                 pose_delta=None):
-        """Cones are in the car's local frame (car at origin, facing +x)."""
         if not 0.0 <= smoothing < 1.0:
             raise ValueError("smoothing must be in [0, 1).")
         path, local_info = local_centerline(
@@ -87,18 +70,12 @@ class Planner:
             self._previous_local_path = path
             return path
         blended = (1.0 - smoothing) * path + smoothing * previous
-        blended[0] = path[0]          # keep the car anchor exact
+        blended[0] = path[0]
         self._previous_local_path = blended
         return blended
 
     @staticmethod
     def _transform_previous_local_path(points, pose_delta):
-        """Move a previous local-frame path into the current local frame.
-
-        pose_delta is (dx, dy, dtheta): current car pose expressed in the
-        previous local frame. This keeps temporal smoothing physically tied to
-        ego-motion instead of blending two unrelated local frames.
-        """
         dx, dy, dtheta = pose_delta
         c, s = np.cos(-dtheta), np.sin(-dtheta)
         rot = np.array([[c, -s], [s, c]])
@@ -118,12 +95,10 @@ class Planner:
         y = np.interp(wanted, distance, pts[:, 1])
         return np.column_stack([x, y])
 
-    # ---- transition -------------------------------------------------------
     def finish_mapping(self, left_cones, right_cones, start_pose=None):
-        """Called once when SLAM says the map is complete (loop closure)."""
         loops = global_centerline(left_cones, right_cones,
                                   start_pose=start_pose, n_points=self.n_points)
-        main_loop = loops[0]          # the lap = the largest loop
+        main_loop = loops[0]
         raceline, shift, race_info = minimum_curvature_raceline(
             main_loop, left_cones, right_cones,
             car_width=self.car_width, safety=self.safety, return_info=True)
@@ -151,19 +126,17 @@ class Planner:
                 "optimizer_message": race_info["optimizer_message"],
                 "optimizer_iterations": race_info["optimizer_iterations"],
             },
-            "all_loops": loops,       # >1 for a skidpad (the two circles)
+            "all_loops": loops,
         }
         self.mode = "racing"
         return self.result
 
-    # ---- racing mode ------------------------------------------------------
     def race(self):
         if self.result is None:
             raise RuntimeError("finish_mapping() has not been called yet.")
         return self.result
 
     def reset_exploration(self):
-        """Clear local path memory, e.g. after relocalisation or mode reset."""
         self._previous_local_path = None
         if self.result is None:
             self.mode = "exploration"

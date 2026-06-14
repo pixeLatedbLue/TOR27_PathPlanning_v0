@@ -1,27 +1,9 @@
-"""
-Headless runner for the path-planning pipeline -- no UI, no pygame, no display.
-
-This is what you run on a headless machine (CI, a server, or a Jetson in a
-Docker container): it arms a mission, presses GO, drives the whole pipeline to
-the finish and prints a short telemetry summary. It imports only the simulation
-(numpy + scipy), so it needs no graphics stack at all.
-
-    python run_headless.py                # default: autocross
-    python run_headless.py skidpad        # one named mission
-    python run_headless.py all            # every mission, one after another
-
-Exit code is 0 only if every mission asked for reached "AS Finished" in time,
-so it works as a smoke test ("does the whole thing still run end to end?").
-"""
-
 import sys
 
 from simulation import Simulation
 from autonomous_system import AS_READY, AS_FINISHED
 from tracks import ALL_MISSIONS
 
-# how long (in simulated seconds) we let each mission run before giving up.
-# trackdrive is ten laps, so it needs the most.
 TIME_BUDGET_S = {
     "acceleration": 60.0,
     "skidpad": 90.0,
@@ -35,7 +17,6 @@ DEFAULT_BUDGET_S = 200.0
 
 
 def _arm_and_launch(sim):
-    """ASMS on, wait out the 5 s AS-Ready hold, then press GO (rules T14.8.4)."""
     sim.set_asms(True)
     for _ in range(2000):
         sim.tick()
@@ -46,7 +27,6 @@ def _arm_and_launch(sim):
 
 
 def run(mission, dt=0.04):
-    """Drive one mission to the finish. Returns (finished, snapshot)."""
     sim = Simulation(dt=dt)
     sim.select_mission(mission)
     _arm_and_launch(sim)

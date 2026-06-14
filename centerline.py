@@ -1,33 +1,10 @@
-"""
-Centerline extraction from cones, for both modes.
-
-global_centerline(...)  -- RACING mode, full map. Builds the Delaunay
-    triangulation, takes the midpoints of left-right ("gate") edges, and
-    orders them with a graph walk that uses HEADING to keep each loop smooth.
-    It returns a LIST of closed loops:
-        * a normal track (trackdrive / autocross) -> one loop
-        * a skidpad                                -> two loops (the two circles)
-
-local_centerline(...)   -- EXPLORATION mode. Works in the car's local frame
-    (car at the origin, facing +x) on the cones currently visible, and returns
-    a short path just ahead for the controller to follow.
-"""
-
 import numpy as np
 from scipy.spatial import Delaunay, QhullError
 
 from geometry import as_points, remove_duplicates, smooth_loop, resample_loop, unit
 
 
-# --------------------------------------------------------------------------
-# gates: midpoints of left-right Delaunay edges
-# --------------------------------------------------------------------------
 def _find_gates(all_cones, side, max_edge_length):
-    """A 'gate' is the midpoint of an edge joining a left cone to a right cone.
-    Returns (gate_mid, triangle_gates):
-        gate_mid       dict  edge_key -> midpoint
-        triangle_gates list  of [edge_key, ...] for triangles with >= 2 gates
-    """
     try:
         tri = Delaunay(all_cones)
     except QhullError as exc:
@@ -48,9 +25,6 @@ def _find_gates(all_cones, side, max_edge_length):
     return gate_mid, triangle_gates
 
 
-# --------------------------------------------------------------------------
-# RACING: global centerline(s)
-# --------------------------------------------------------------------------
 def global_centerline(left_cones, right_cones, start_pose=None,
                       max_edge_length=7.0, smooth_window=5, n_points=300,
                       min_loop_gates=8):
@@ -69,7 +43,6 @@ def global_centerline(left_cones, right_cones, start_pose=None,
     if len(gate_mid) < 3:
         raise ValueError("Not enough gates - check cones or max_edge_length.")
 
-    # Two gates are neighbours if they share a triangle.
     adjacency = {k: set() for k in gate_mid}
     for here in triangle_gates:
         for i in range(len(here)):
@@ -86,7 +59,7 @@ def global_centerline(left_cones, right_cones, start_pose=None,
         line = np.array([gate_mid[k] for k in order])
         line = smooth_loop(line, smooth_window)
         loops.append(resample_loop(line, n_points))
-    loops.sort(key=_loop_length, reverse=True)        # biggest loop first
+    loops.sort(key=_loop_length, reverse=True)
     return loops
 
 
@@ -96,7 +69,6 @@ def _loop_length(loop):
 
 
 def _choose_next(pos, current, candidates, heading=None, preferred_axis=None):
-    """Pick the next graph node with a smoothness-aware score."""
     best = None
     best_score = -np.inf
     for k in candidates:
@@ -109,7 +81,6 @@ def _choose_next(pos, current, candidates, heading=None, preferred_axis=None):
         progress_score = 0.0
         if preferred_axis is not None:
             progress_score = float(np.dot(direction, preferred_axis))
-        # Penalize long jumps, but do not make distance dominate tight turns.
         score = 2.5 * heading_score + 1.0 * progress_score - 0.08 * dist
         if score > best_score:
             best_score = score
@@ -120,9 +91,6 @@ def _choose_next(pos, current, candidates, heading=None, preferred_axis=None):
 
 
 def _extract_loops(gate_mid, adjacency, start_pose, min_loop_gates):
-    """Walk the gate graph into one or more closed loops. Each walk keeps the
-    heading smooth; when it runs out of connected gates it closes that loop and
-    starts a new one from any leftover gates."""
     keys = list(gate_mid)
     pos = gate_mid
     visited = set()
@@ -158,13 +126,8 @@ def _extract_loops(gate_mid, adjacency, start_pose, min_loop_gates):
     return loops
 
 
-# --------------------------------------------------------------------------
-# EXPLORATION: short local centerline from the visible cones
-# --------------------------------------------------------------------------
 def local_centerline(left_visible, right_visible,
                      max_edge_length=7.0, look_ahead=15.0, return_info=False):
-    """Cones are in the car's LOCAL frame: car at (0,0) facing +x.
-    Returns a short ordered path starting at the car and heading forward."""
     if max_edge_length <= 0.0:
         raise ValueError("max_edge_length must be positive.")
     if look_ahead <= 0.0:
@@ -177,7 +140,7 @@ def local_centerline(left_visible, right_visible,
         "gate_count": 0,
     }
 
-    if len(left) == 0 or len(right) == 0:          # can't see both sides -> straight
+    if len(left) == 0 or len(right) == 0:
         info.update({"fallback": True, "reason": "missing one cone boundary"})
         path = np.array([[0.0, 0.0], [look_ahead, 0.0]])
         return (path, info) if return_info else path
@@ -185,7 +148,7 @@ def local_centerline(left_visible, right_visible,
     all_cones = np.vstack([left, right])
     side = np.array([0] * len(left) + [1] * len(right))
 
-    midpoints = [np.array([0.0, 0.0])]             # start at the car
+    midpoints = [np.array([0.0, 0.0])]
     if len(all_cones) >= 3:
         try:
             tri = Delaunay(all_cones)
@@ -223,7 +186,7 @@ def local_centerline(left_visible, right_visible,
         seen.add(nxt)
 
     path = midpoints[order]
-    path = path[path[:, 0] > -0.5]                 # keep what's ahead of the car
+    path = path[path[:, 0] > -0.5]
     path = path[path[:, 0] <= look_ahead + 2.0]
     if len(path) < 2:
         info.update({"fallback": True, "reason": "no forward gates"})

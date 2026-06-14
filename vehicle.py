@@ -1,20 +1,8 @@
-"""
-A simple car model + path follower.
-
-Just enough vehicle to make the pipeline visible: a kinematic bicycle model
-(the standard teaching model) steered by pure pursuit, with a rate-limited
-throttle/brake so speed changes look physical. The emergency brake follows the
-rules' deceleration target (T15.4.2: average deceleration > 10 m/s^2).
-
-It is NOT a dynamic tyre model -- no slip, no load transfer -- which is why the
-skidpad "fast line" is left to the geometric centreline (see raceline.py).
-"""
-
 import numpy as np
 
-EBS_DECEL = 11.0       # m/s^2, emergency brake (rules T15.4.2 require > 10)
-MAX_ACCEL = 4.0        # m/s^2, normal acceleration
-MAX_DECEL = 6.0        # m/s^2, normal braking
+EBS_DECEL = 11.0
+MAX_ACCEL = 4.0
+MAX_DECEL = 6.0
 MAX_STEER = np.radians(28.0)
 
 
@@ -37,9 +25,7 @@ class Vehicle:
     def is_stopped(self, eps=0.15):
         return self.v < eps
 
-    # ---- control ----------------------------------------------------------
     def _pure_pursuit(self, path_world, lookahead):
-        """Steering angle toward a point ~lookahead metres along the path."""
         if path_world is None or len(path_world) < 2:
             return 0.0
         p = self.position
@@ -52,16 +38,14 @@ class Vehicle:
                 break
         to_target = target - p
         alpha = np.arctan2(to_target[1], to_target[0]) - self.theta
-        alpha = np.arctan2(np.sin(alpha), np.cos(alpha))   # wrap to [-pi, pi]
+        alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
         ld = max(np.linalg.norm(to_target), 1e-3)
         return np.arctan2(2.0 * self.wheelbase * np.sin(alpha), ld)
 
     def step(self, dt, path_world, target_speed, brake=False, lookahead=4.0):
-        """Advance one tick following `path_world` toward `target_speed`."""
         if brake:
             target_speed = 0.0
 
-        # longitudinal: rate-limited approach to the target speed
         if target_speed >= self.v:
             self.v = min(target_speed, self.v + MAX_ACCEL * dt)
         else:
@@ -69,12 +53,10 @@ class Vehicle:
             self.v = max(target_speed, self.v - decel * dt)
         self.v = float(np.clip(self.v, 0.0, self.max_speed))
 
-        # lateral: pure pursuit (scale the lookahead a little with speed)
         if not brake and self.v > 1e-3:
             ld = float(np.clip(lookahead + 0.4 * self.v, 2.5, 10.0))
             self.steer = float(np.clip(self._pure_pursuit(path_world, ld),
                                        -MAX_STEER, MAX_STEER))
-        # bicycle-model kinematics
         self.x += self.v * np.cos(self.theta) * dt
         self.y += self.v * np.sin(self.theta) * dt
         self.theta += self.v / self.wheelbase * np.tan(self.steer) * dt

@@ -1,30 +1,12 @@
-"""
-A simple cone-detection sensor (stands in for camera + LiDAR perception).
-
-The real car runs a perception stack that turns camera / LiDAR data into a list
-of cones with a colour and a position. We fake that here: given the car's pose
-and the ground-truth track, return the cones the car can currently "see".
-
-A detection is realistic-ish, not perfect:
-    * only cones within `max_range` metres,
-    * only cones inside the forward field of view `fov_deg`,
-    * each visible cone is detected with probability `detect_prob`,
-    * the measured position has a bit of Gaussian noise.
-
-Detections come back in the car's LOCAL frame (car at the origin, +x forward),
-which is exactly what the exploration planner and the mapper expect.
-"""
-
 import numpy as np
 
 
 class Detection:
-    """One detected cone, in the car's local frame."""
     __slots__ = ("xy", "color")
 
     def __init__(self, xy, color):
-        self.xy = np.asarray(xy, float)   # (x, y) local
-        self.color = color                # "blue" (left) or "yellow" (right)
+        self.xy = np.asarray(xy, float)
+        self.color = color
 
 
 class Perception:
@@ -43,7 +25,6 @@ class Perception:
         self.rng = np.random.default_rng(seed)
 
     def sense(self, pose):
-        """Return the cones visible from `pose` as Detection objects (local)."""
         px, py, theta = pose
         origin = np.array([px, py])
         c, s = np.cos(-theta), np.sin(-theta)
@@ -56,11 +37,11 @@ class Perception:
                 dist = np.hypot(rel[0], rel[1])
                 if dist > self.max_range:
                     continue
-                local = rot @ rel                       # into the car frame
+                local = rot @ rel
                 bearing = np.arctan2(local[1], local[0])
-                if abs(bearing) > self.half_fov:        # outside the FOV
+                if abs(bearing) > self.half_fov:
                     continue
-                if self.rng.random() > self.detect_prob:  # a missed detection
+                if self.rng.random() > self.detect_prob:
                     continue
                 measured = local + self.noise_std * self.rng.standard_normal(2)
                 out.append(Detection(measured, color))
@@ -68,7 +49,6 @@ class Perception:
 
     @staticmethod
     def split(detections):
-        """Split a detection list into (left_local, right_local) Nx2 arrays."""
         left = [d.xy for d in detections if d.color == "blue"]
         right = [d.xy for d in detections if d.color == "yellow"]
         left = np.array(left) if left else np.zeros((0, 2))
