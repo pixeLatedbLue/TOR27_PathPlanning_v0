@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "path-planning"
+version = "0.3.0"
+description = "Real-time path-planning pipeline for a Formula Student Driverless car."
+readme = "README.md"
+requires-python = ">=3.10"
+# Core runtime is just numpy + scipy -- enough for the headless pipeline, the
+# headless runner and the tests (this is all the Jetson / Docker image needs).
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+# the live pygame visualiser (app.py) is the only thing that needs a display.
+ui = [
+    "pygame>=2.5",
+]
+
+[tool.setuptools]
+py-modules = [
+    "geometry",
+    "centerline",
+    "raceline",
+    "planner",
+    "tracks",
+    "perception",
+    "mapping",
+    "vehicle",
+    "autonomous_system",
+    "simulation",
+    "run_headless",
+    "app",
+]

@@ -1,0 +1,5 @@
+# Core runtime: the headless pipeline, the headless runner and the tests.
+# This is all the Jetson / Docker image installs. For the live UI also install
+# requirements-ui.txt (see README).
+numpy>=2.0
+scipy>=1.13
