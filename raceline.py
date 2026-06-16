@@ -37,7 +37,7 @@ def minimum_curvature_raceline(centerline, left_cones, right_cones,
     info = {
         "optimizer_success": bool(result.success),
         "optimizer_message": str(result.message),
-        "optimizer_iterations": int(result.nit),
+        "optimizer_iterations": int(result.get("nit", 0)),
         "min_half_width": float(np.min(half_width)) if len(half_width) else 0.0,
         "mean_half_width": float(np.mean(half_width)) if len(half_width) else 0.0,
         "left_clearance": left_clearance,

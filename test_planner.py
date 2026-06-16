@@ -32,6 +32,16 @@ class PlannerTests(unittest.TestCase):
         self.assertTrue(np.all(result["speed_profile"] >= planner.min_speed))
         self.assertTrue(np.all(result["speed_profile"] <= planner.max_speed))
 
+    def test_finish_mapping_on_narrow_track_does_not_crash(self):
+        t = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
+        center = np.column_stack([10.0 * np.cos(t), 8.0 * np.sin(t)])
+        planner = Planner(n_points=60)
+        result = planner.finish_mapping(
+            center * 1.15, center * 0.85,
+            start_pose=(center[0, 0], center[0, 1], 0.0))
+        self.assertEqual(result["raceline"].shape, (60, 2))
+        self.assertTrue(np.all(np.isfinite(result["raceline"])))
+
     def test_exploration_fallback_reports_low_confidence(self):
         planner = Planner()
         result = planner.explore(np.zeros((0, 2)), np.array([[3.0, -2.0]]))
@@ -159,6 +169,19 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertGreaterEqual(sim.vehicle.x, sim.track.finish_x)
 
+    def test_acceleration_drives_straight(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(ACCELERATION)
+        self._arm_and_launch(sim)
+        max_dev = 0.0
+        for _ in range(2000):
+            sim.tick()
+            max_dev = max(max_dev, abs(sim.vehicle.y))
+            if sim.AS.state == AS_FINISHED:
+                break
+        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertLess(max_dev, 0.25)
+
     def test_autocross_explores_then_races_and_finishes(self):
         sim = self._run(AUTOCROSS, 6000)
         self.assertEqual(sim.AS.state, AS_FINISHED)
@@ -169,6 +192,26 @@ class MissionTests(unittest.TestCase):
         sim = self._run(SKIDPAD, 6000)
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertEqual(sim.lap, 4)
+        self.assertEqual(len(sim.skidpad_loops), 2)
+        self.assertTrue(all(np.all(np.isfinite(loop)) for loop in sim.skidpad_loops))
+
+    def test_skidpad_stays_within_the_lane(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(SKIDPAD)
+        self._arm_and_launch(sim)
+        R = 9.125
+        cR, cL = np.array([R, 0.0]), np.array([-R, 0.0])
+        worst = 0.0
+        for _ in range(6000):
+            sim.tick()
+            p = sim.vehicle.position
+            off = min(abs(np.linalg.norm(p - cR) - R),
+                      abs(np.linalg.norm(p - cL) - R))
+            worst = max(worst, off)
+            if sim.AS.state == AS_FINISHED:
+                break
+        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertLess(worst, 1.5)
 
     def test_inspection_finishes(self):
         sim = self._run(INSPECTION, 1200)

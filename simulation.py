@@ -3,7 +3,6 @@ import numpy as np
 from autonomous_system import (AutonomousSystem, AS_OFF, AS_READY, AS_DRIVING,
                                AS_EMERGENCY, AS_FINISHED,
                                READY_HOLD_S, DRIVING_HOLD_S)
-from centerline import global_centerline
 from mapping import ConeMap
 from perception import Perception
 from planner import Planner
@@ -123,8 +122,27 @@ class Simulation:
         self.local_path_world = local_to_world(plan["local_path"], self.vehicle.pose)
         return self.local_path_world, plan
 
+    def _straight_path(self):
+        left = self.cmap.left_cones()
+        right = self.cmap.right_cones()
+        x, y, theta = self.vehicle.pose
+        fits = []
+        for side in (left, right):
+            if len(side) >= 2:
+                fits.append(np.polyfit(side[:, 0], side[:, 1], 1))
+        if fits:
+            m = float(np.mean([f[0] for f in fits]))
+            c = float(np.mean([f[1] for f in fits]))
+            xs = np.linspace(x - 2.0, x + 60.0, 40)
+            path = np.column_stack([xs, m * xs + c])
+        else:
+            path = np.array([[x, y],
+                             [x + 60.0 * np.cos(theta), y + 60.0 * np.sin(theta)]])
+        self.local_path_world = path
+        return path
+
     def _drive_straight(self, dt):
-        path, _ = self._explore_path()
+        path = self._straight_path()
         self.phase = "straight"
         self.lap = self.track.laps_required
         finish_x = self.track.finish_x or 75.0
@@ -147,13 +165,8 @@ class Simulation:
     def _drive_skidpad(self, dt):
         self.phase = "skidpad"
         cl = self.track.centerline
-        if self.skidpad_loops is None and self.cmap.cone_count() > 30:
-            try:
-                self.skidpad_loops = global_centerline(
-                    self.cmap.left_cones(), self.cmap.right_cones(),
-                    max_edge_length=4.0, n_points=120)
-            except ValueError:
-                self.skidpad_loops = None
+        if self.skidpad_loops is None and len(cl) >= 360:
+            self.skidpad_loops = [cl[:120], cl[240:360]]
 
         path, done = self._follow_fixed(cl, dt, SKIDPAD_SPEED)
         req = self.track.laps_required

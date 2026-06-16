@@ -68,8 +68,8 @@ def _skidpad(lane=3.0):
         a = np.linspace(start, start + turns * 2 * np.pi, k)
         return np.column_stack([cxc + r_drive * np.cos(a), r_drive * np.sin(a)])
 
-    right_loops = arc(+cx, np.pi, 2.0, 240)
-    left_loops = arc(-cx, 0.0, -2.0, 240)
+    right_loops = arc(+cx, np.pi, -2.0, 240)
+    left_loops = arc(-cx, 0.0, 2.0, 240)
     center = np.vstack([right_loops, left_loops])
     return Track(SKIDPAD, blue, yellow, start_pose=(0.0, 0.0, np.pi / 2),
                  centerline=center, closed=False, laps_required=4,
