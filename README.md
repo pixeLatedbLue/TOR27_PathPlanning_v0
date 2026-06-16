@@ -3,9 +3,8 @@
 This is a path planning pipeline for a Formula Student Driverless (FSD) car,
 with a small live viewer so you can watch it work. The car gets cones from a
 (fake) sensor, builds a map of the track, plans a path through it, and drives
-that path while following the FSD rules. It is built for the four driving
-missions: **acceleration, skidpad, autocross and trackdrive**, plus the **EBS
-test**, **inspection** and a **manual** mode.
+that path while following the FSD rules. It is built for the four Formula
+Student driving missions: **acceleration, skidpad, autocross and trackdrive**.
 
 ## Status: not tested yet
 
@@ -19,20 +18,17 @@ still change once it runs on hardware.
 
 The idea is simple. The track is marked by cones (blue on the left, yellow on
 the right). The car cannot see the whole track at once, it only sees the cones
-near it. So it drives slowly first to map the track, and once it knows the full
-loop it plans a faster line and races on it.
+near it. So it drives slowly first in perception mode to map the track. Once you
+switch it to race mode, it plans a faster line and races on it.
 
 It handles all the FSD missions:
 
 | Mission | What happens |
 |---------|--------------|
 | **Acceleration** | Drive straight down a 75 m lane, then brake to a stop. |
-| **Skidpad** | Drive the figure of eight (two circles), right side twice then left side twice. |
-| **Autocross** | Map one lap, then race one fast lap on the planned line. |
-| **Trackdrive** | Map one lap, then race the rest (10 laps in total). |
-| **EBS test** | Speed up, fire the emergency brake, and show the deceleration. |
-| **Inspection** | Car is jacked up, it just spins the wheels and steers side to side for about 27 seconds. |
-| **Manual** | Human style baseline, the car drives the loop without the racing line. |
+| **Skidpad** | Drive the figure of eight (right circle, then left), three warm-up laps, then one fast lap. |
+| **Autocross** | Map the track in perception mode, then (on the RACE button) race the planned line. |
+| **Trackdrive** | Map in perception mode, then (on the RACE button) race lap after lap until you end it. |
 
 It also models the safety side of FSD, not just the driving:
 
@@ -60,9 +56,12 @@ small time step).
    out and the same cone is not added twice.
 3. **Explore.** While the map is not finished, the planner looks at the cones
    right in front, finds the middle line between the left and right cones, and
-   the car follows that middle line slowly.
-4. **Close the loop.** When the car comes back near where it started after
-   driving far enough, the map is treated as complete.
+   the car follows that middle line slowly. If it can only see one side, it
+   follows that boundary's curve; if it sees no cones at all, it keeps going
+   straight rather than stopping.
+4. **Switch to racing.** The car keeps lapping in perception mode, mapping as it
+   goes, until you press RACE. It then finishes the current lap and switches to
+   race mode, now with a full map to plan from.
 5. **Plan the racing line.** Now that all the cones are known, the planner joins
    the left and right cones into pairs (using a triangulation), takes the
    midpoints to get the full centre line, then slides each point sideways to
@@ -125,15 +124,15 @@ path_planning/
   viewer to draw.
 - **perception.py** pretends to be the camera and lidar. Given the car position
   it returns the cones in range and in front of the car, with a bit of noise.
-- **mapping.py** keeps the growing map of cones and decides when a full lap has
-  been mapped.
+- **mapping.py** keeps the growing map of cones, averaging out the sensor noise
+  as the same cones are seen again.
 - **centerline.py** takes the left and right cones and works out the line down
   the middle of the track, both for the small bit in front (explore) and for the
   whole loop (race).
 - **raceline.py** takes that centre line and bends it into a faster racing line
   that still stays inside the cones, and finds the apex points.
 - **planner.py** is the part the rest of the car talks to. It runs explore mode
-  first, then switches to race mode once the map is done.
+  first, then builds the racing line and switches to race mode when asked.
 - **geometry.py** holds the shared maths used everywhere: curvature, smoothing,
   resampling, the speed profile and some checks.
 - **vehicle.py** is the simple car: how it moves, how it steers towards the path,
@@ -179,10 +178,29 @@ pip install -r requirements-ui.txt
 python app.py
 ```
 
-In the viewer: pick a mission at the top (keys 1 to 7), turn **ASMS ON** (key A),
-press **GO** (key G, it unlocks 5 seconds after Ready), and watch it drive.
-**EMERGENCY** (key E) fires the EBS, **RESET** (key R) starts over, and **PAUSE**
-(key P) and the speed button let you slow it down or speed it up.
+In the viewer: pick a mission at the top (keys 1 to 4), turn **ASMS ON** (key A),
+press **GO** (key G, it unlocks 5 seconds after Ready), and watch it drive. On
+the loop missions (autocross, trackdrive) the car starts in **perception mode**,
+lapping while it maps the track, with a lap counter shown on the map.
+Press **RACE** (key M) to switch it to race mode; the switch happens once it next
+completes a lap. **END** (key F) treats the current lap as the last one and
+brings the car to a stop back at the start line. **STOP** (key S) stops the car
+wherever it is. **EMERGENCY** (key E) fires the EBS, **RESET** (key R) starts
+over, and **PAUSE** (key P) freezes the view.
+
+Controls at a glance:
+
+| Key | Button | What it does |
+|-----|--------|--------------|
+| 1 to 4 | mission tabs | pick the mission |
+| A | ASMS | arm the autonomous system |
+| G | GO | start the run (unlocks 5 s after Ready) |
+| M | RACE | switch perception mode to race mode on the next completed lap |
+| F | END | make this the final lap and stop at the start line |
+| S | STOP | stop the car where it is |
+| E | EMERGENCY | fire the EBS hard stop |
+| R | RESET | restart the current mission |
+| P | PAUSE | freeze the view |
 
 **Run the tests:**
 

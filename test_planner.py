@@ -11,8 +11,7 @@ from perception import Perception, Detection
 from planner import Planner
 from simulation import Simulation
 from tracks import (build_track, make_loop_track, make_skidpad,
-                    ACCELERATION, AUTOCROSS, SKIDPAD, EBS_TEST, INSPECTION,
-                    TRACKDRIVE)
+                    ACCELERATION, AUTOCROSS, SKIDPAD, TRACKDRIVE)
 from vehicle import EBS_DECEL
 
 
@@ -182,18 +181,92 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertLess(max_dev, 0.25)
 
-    def test_autocross_explores_then_races_and_finishes(self):
-        sim = self._run(AUTOCROSS, 6000)
-        self.assertEqual(sim.AS.state, AS_FINISHED)
+    def test_autocross_stays_in_perception_until_race_requested(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(AUTOCROSS)
+        self._arm_and_launch(sim)
+        for _ in range(4000):
+            sim.tick()
+        self.assertIsNone(sim.race)
+        self.assertEqual(sim.phase, "exploration")
+
+    def test_autocross_races_after_race_requested_then_stops(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(AUTOCROSS)
+        self._arm_and_launch(sim)
+        sim.request_race()
+        for _ in range(8000):
+            sim.tick()
+            if sim.race is not None and sim.lap >= 2:
+                break
         self.assertIsNotNone(sim.race)
         self.assertGreaterEqual(sim.lap, 2)
+        self.assertNotEqual(sim.AS.state, AS_FINISHED)
+        sim.request_stop()
+        for _ in range(800):
+            sim.tick()
+            if sim.AS.state == AS_FINISHED:
+                break
+        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertTrue(sim.vehicle.is_stopped())
 
-    def test_skidpad_finishes_four_loops(self):
-        sim = self._run(SKIDPAD, 6000)
+    def test_end_finishes_lap_and_stops_near_start(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(AUTOCROSS)
+        self._arm_and_launch(sim)
+        sim.request_race()
+        for _ in range(8000):
+            sim.tick()
+            if sim.race is not None and sim.lap >= 2:
+                break
+        self.assertIsNotNone(sim.race)
+        sim.request_end()
+        for _ in range(8000):
+            sim.tick()
+            if sim.AS.state == AS_FINISHED:
+                break
+        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertTrue(sim.vehicle.is_stopped())
+        start = np.array(sim.track.start_pose[:2])
+        self.assertLess(np.linalg.norm(sim.vehicle.position - start), 4.0)
+
+    def test_skidpad_end_finishes_lap_and_stops_near_start(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(SKIDPAD)
+        self._arm_and_launch(sim)
+        start = np.array(sim.track.start_pose[:2])
+        for _ in range(2000):
+            sim.tick()
+            if sim.sim_time > 8 and np.linalg.norm(sim.vehicle.position - start) > 10:
+                break
+        sim.request_end()
+        for _ in range(8000):
+            sim.tick()
+            if sim.AS.state == AS_FINISHED:
+                break
+        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertTrue(sim.vehicle.is_stopped())
+        self.assertLess(np.linalg.norm(sim.vehicle.position - start), 4.0)
+
+    def test_skidpad_runs_three_warmups_then_fast_lap(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(SKIDPAD)
+        self._arm_and_launch(sim)
+        saw_fast = False
+        max_speed = 0.0
+        for _ in range(8000):
+            sim.tick()
+            if "FAST LAP" in sim.message:
+                saw_fast = True
+            max_speed = max(max_speed, sim.vehicle.v)
+            if sim.AS.state == AS_FINISHED:
+                break
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertEqual(sim.lap, 4)
         self.assertEqual(len(sim.skidpad_loops), 2)
         self.assertTrue(all(np.all(np.isfinite(loop)) for loop in sim.skidpad_loops))
+        self.assertTrue(saw_fast)
+        self.assertGreater(max_speed, 7.5)
 
     def test_skidpad_stays_within_the_lane(self):
         sim = Simulation(dt=0.04)
@@ -212,16 +285,6 @@ class MissionTests(unittest.TestCase):
                 break
         self.assertEqual(sim.AS.state, AS_FINISHED)
         self.assertLess(worst, 1.5)
-
-    def test_inspection_finishes(self):
-        sim = self._run(INSPECTION, 1200)
-        self.assertEqual(sim.AS.state, AS_FINISHED)
-
-    def test_ebs_test_finishes_and_meets_decel_target(self):
-        sim = self._run(EBS_TEST, 3000)
-        self.assertEqual(sim.AS.state, AS_FINISHED)
-        self.assertTrue(sim.vehicle.is_stopped())
-        self.assertGreater(sim.ebs_decel, 10.0)
 
     def test_emergency_mid_drive_stops_the_car_hard(self):
         sim = Simulation(dt=0.04)

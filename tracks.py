@@ -4,13 +4,9 @@ ACCELERATION = "acceleration"
 SKIDPAD = "skidpad"
 AUTOCROSS = "autocross"
 TRACKDRIVE = "trackdrive"
-INSPECTION = "inspection"
-EBS_TEST = "ebs_test"
-MANUAL = "manual"
 
-DRIVING_MISSIONS = (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE, EBS_TEST)
-ALL_MISSIONS = (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE,
-                INSPECTION, EBS_TEST, MANUAL)
+DRIVING_MISSIONS = (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE)
+ALL_MISSIONS = (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE)
 
 
 class Track:
@@ -68,9 +64,10 @@ def _skidpad(lane=3.0):
         a = np.linspace(start, start + turns * 2 * np.pi, k)
         return np.column_stack([cxc + r_drive * np.cos(a), r_drive * np.sin(a)])
 
-    right_loops = arc(+cx, np.pi, -2.0, 240)
-    left_loops = arc(-cx, 0.0, 2.0, 240)
-    center = np.vstack([right_loops, left_loops])
+    right_circle = arc(+cx, np.pi, -1.0, 120)
+    left_circle = arc(-cx, 0.0, 1.0, 120)
+    figure_eight = np.vstack([right_circle, left_circle])
+    center = np.vstack([figure_eight] * 4)
     return Track(SKIDPAD, blue, yellow, start_pose=(0.0, 0.0, np.pi / 2),
                  centerline=center, closed=False, laps_required=4,
                  length=2 * np.pi * r_drive)
@@ -78,8 +75,8 @@ def _skidpad(lane=3.0):
 
 def _loop_centerline(n=220, seed=7):
     t = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
-    rx = 32.0 + 7.0 * np.sin(2 * t) + 3.0 * np.cos(3 * t)
-    ry = 22.0 + 5.0 * np.cos(2 * t) + 2.5 * np.sin(3 * t)
+    rx = 34.0 + 6.0 * np.sin(2 * t)
+    ry = 24.0 + 5.0 * np.cos(2 * t)
     return np.column_stack([rx * np.cos(t), ry * np.sin(t)])
 
 
@@ -120,17 +117,8 @@ def build_track(mission):
         return _skidpad()
     if mission == AUTOCROSS:
         return _closed_loop(AUTOCROSS, laps_required=2)
-    if mission in (TRACKDRIVE, MANUAL):
-        return _closed_loop(mission if mission == TRACKDRIVE else AUTOCROSS,
-                            laps_required=10)
-    if mission == EBS_TEST:
-        t = _acceleration(width=3.0, length=60.0)
-        t.mission = EBS_TEST
-        return t
-    if mission == INSPECTION:
-        return Track(INSPECTION, np.zeros((0, 2)), np.zeros((0, 2)),
-                     start_pose=(0.0, 0.0, 0.0), centerline=np.zeros((0, 2)),
-                     closed=False, laps_required=0, length=0.0)
+    if mission == TRACKDRIVE:
+        return _closed_loop(TRACKDRIVE, laps_required=10)
     raise ValueError(f"unknown mission: {mission}")
 
 

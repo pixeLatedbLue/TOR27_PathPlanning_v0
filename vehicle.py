@@ -5,6 +5,10 @@ MAX_ACCEL = 4.0
 MAX_DECEL = 6.0
 MAX_STEER = np.radians(28.0)
 
+LOOKAHEAD_GAIN = 0.4
+LOOKAHEAD_MIN = 2.0
+LOOKAHEAD_MAX = 3.5
+
 
 class Vehicle:
     def __init__(self, pose, wheelbase=1.55, max_speed=18.0):
@@ -54,7 +58,8 @@ class Vehicle:
         self.v = float(np.clip(self.v, 0.0, self.max_speed))
 
         if not brake and self.v > 1e-3:
-            ld = float(np.clip(lookahead + 0.4 * self.v, 2.5, 10.0))
+            ld = float(np.clip(lookahead + LOOKAHEAD_GAIN * self.v,
+                               LOOKAHEAD_MIN, LOOKAHEAD_MAX))
             self.steer = float(np.clip(self._pure_pursuit(path_world, ld),
                                        -MAX_STEER, MAX_STEER))
         self.x += self.v * np.cos(self.theta) * dt

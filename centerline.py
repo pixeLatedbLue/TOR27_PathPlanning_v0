@@ -126,6 +126,23 @@ def _extract_loops(gate_mid, adjacency, start_pose, min_loop_gates):
     return loops
 
 
+def _single_boundary_path(cones, side, half_width=1.5):
+    pts = cones[cones[:, 0] > -1.0]
+    if len(pts) == 0:
+        return None
+    pts = pts[np.argsort(pts[:, 0])]
+    if len(pts) >= 2:
+        tang = np.gradient(pts, axis=0)
+    else:
+        tang = np.array([[1.0, 0.0]])
+    tang = tang / (np.linalg.norm(tang, axis=1, keepdims=True) + 1e-9)
+    if side == "left":
+        normal = np.column_stack([tang[:, 1], -tang[:, 0]])
+    else:
+        normal = np.column_stack([-tang[:, 1], tang[:, 0]])
+    return np.vstack([[0.0, 0.0], pts + half_width * normal])
+
+
 def local_centerline(left_visible, right_visible,
                      max_edge_length=7.0, look_ahead=15.0, return_info=False):
     if max_edge_length <= 0.0:
@@ -140,9 +157,19 @@ def local_centerline(left_visible, right_visible,
         "gate_count": 0,
     }
 
-    if len(left) == 0 or len(right) == 0:
-        info.update({"fallback": True, "reason": "missing one cone boundary"})
+    if len(left) == 0 and len(right) == 0:
+        info.update({"fallback": True, "reason": "no cones in view"})
         path = np.array([[0.0, 0.0], [look_ahead, 0.0]])
+        return (path, info) if return_info else path
+
+    if len(left) == 0 or len(right) == 0:
+        side, cones = ("left", left) if len(right) == 0 else ("right", right)
+        path = _single_boundary_path(cones, side)
+        if path is None or len(path) < 2:
+            info.update({"fallback": True, "reason": "no cones ahead"})
+            path = np.array([[0.0, 0.0], [look_ahead, 0.0]])
+        else:
+            info.update({"fallback": True, "reason": f"following {side} boundary"})
         return (path, info) if return_info else path
 
     all_cones = np.vstack([left, right])

@@ -5,8 +5,7 @@ import pygame
 from simulation import Simulation, local_to_world
 from autonomous_system import (AS_OFF, AS_READY, AS_DRIVING, AS_EMERGENCY,
                                AS_FINISHED)
-from tracks import (ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE, INSPECTION,
-                    EBS_TEST, MANUAL)
+from tracks import ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE
 
 WIDTH, HEIGHT = 1280, 820
 TOPBAR_H = 48
@@ -36,9 +35,8 @@ BAD = (240, 80, 80)
 
 ASSI_COLORS = {"off": (58, 60, 70), "yellow": (250, 212, 48), "blue": (66, 132, 255)}
 
-MISSIONS = [(ACCELERATION, "ACCEL"), (SKIDPAD, "SKIDPAD"), (AUTOCROSS, "AUTOX"),
-            (TRACKDRIVE, "TRACK"), (INSPECTION, "INSPECT"), (EBS_TEST, "EBS"),
-            (MANUAL, "MANUAL")]
+MISSIONS = [(ACCELERATION, "ACCEL"), (SKIDPAD, "SKIDPAD"),
+            (AUTOCROSS, "AUTOX"), (TRACKDRIVE, "TRACK")]
 
 STATE_COLOR = {AS_OFF: DIM, AS_READY: WARN, AS_DRIVING: GOOD,
                AS_EMERGENCY: BAD, AS_FINISHED: ACCENT}
@@ -158,17 +156,22 @@ class App:
         px = PANEL_RECT.x + 16
         pw = PANEL_W - 32
         y = HEIGHT - 250
-        self.btn_asms = Button((px, y, pw, 40), "ASMS: OFF", self.toggle_asms, "toggle")
-        self.btn_go = Button((px, y + 48, pw // 2 - 4, 44), "GO", self.go, "go")
-        self.btn_stop = Button((px + pw // 2 + 4, y + 48, pw // 2 - 4, 44),
+        self.btn_asms = Button((px, y, pw, 38), "ASMS: OFF", self.toggle_asms, "toggle")
+        self.btn_go = Button((px, y + 44, pw // 2 - 4, 42), "GO", self.go, "go")
+        self.btn_stop = Button((px + pw // 2 + 4, y + 44, pw // 2 - 4, 42),
                                "EMERGENCY", self.emergency, "stop")
-        self.btn_reset = Button((px, y + 100, pw, 36), "RESET", self.reset, "action")
-        self.btn_pause = Button((px, y + 142, pw // 2 - 4, 32), "PAUSE",
-                                self.toggle_pause, "action")
-        self.btn_speed = Button((px + pw // 2 + 4, y + 142, pw // 2 - 4, 32),
-                                f"x{self.time_scale}", self.cycle_speed, "action")
-        self.buttons += [self.btn_asms, self.btn_go, self.btn_stop,
-                         self.btn_reset, self.btn_pause, self.btn_speed]
+        self.btn_race = Button((px, y + 92, pw, 34), "RACE", self.race_mode, "action")
+        self.btn_stoprun = Button((px, y + 132, pw // 2 - 4, 32), "STOP",
+                                  self.stop_run, "action")
+        self.btn_end = Button((px + pw // 2 + 4, y + 132, pw // 2 - 4, 32), "END",
+                              self.end_run, "action")
+        self.btn_reset = Button((px, y + 170, pw // 2 - 4, 32), "RESET",
+                                self.reset, "action")
+        self.btn_pause = Button((px + pw // 2 + 4, y + 170, pw // 2 - 4, 32),
+                                "PAUSE", self.toggle_pause, "action")
+        self.buttons += [self.btn_asms, self.btn_go, self.btn_stop, self.btn_race,
+                         self.btn_stoprun, self.btn_end,
+                         self.btn_reset, self.btn_pause]
 
     def choose_mission(self, mission):
         self.sim.select_mission(mission)
@@ -180,6 +183,7 @@ class App:
             b.active = (mid == mission)
         self.btn_asms.label = "ASMS: OFF"
         self.btn_asms.active = False
+        self.btn_race.active = False
 
     def toggle_asms(self):
         new = not self.sim.AS.asms_on
@@ -194,21 +198,27 @@ class App:
     def emergency(self):
         self.sim.emergency()
 
+    def stop_run(self):
+        self.sim.request_stop()
+
     def reset(self):
         self.sim.reset()
         self.trail.clear()
         self.btn_asms.label = "ASMS: OFF"
         self.btn_asms.active = False
         self.btn_go.active = False
+        self.btn_race.active = False
 
     def toggle_pause(self):
         self.paused = not self.paused
         self.btn_pause.label = "RESUME" if self.paused else "PAUSE"
 
-    def cycle_speed(self):
-        order = [1, 2, 4, 8]
-        self.time_scale = order[(order.index(self.time_scale) + 1) % len(order)]
-        self.btn_speed.label = f"x{self.time_scale}"
+    def end_run(self):
+        self.sim.request_end()
+
+    def race_mode(self):
+        self.sim.request_race()
+        self.btn_race.active = True
 
     def run(self):
         running = True
@@ -231,7 +241,7 @@ class App:
         pygame.quit()
 
     def _key(self, key):
-        if pygame.K_1 <= key <= pygame.K_7:
+        if pygame.K_1 <= key <= pygame.K_4:
             self.choose_mission(MISSIONS[key - pygame.K_1][0])
         elif key == pygame.K_a:
             self.toggle_asms()
@@ -239,12 +249,16 @@ class App:
             self.go()
         elif key == pygame.K_e:
             self.emergency()
+        elif key == pygame.K_s:
+            self.stop_run()
+        elif key == pygame.K_f:
+            self.end_run()
+        elif key == pygame.K_m:
+            self.race_mode()
         elif key == pygame.K_r:
             self.reset()
         elif key == pygame.K_p:
             self.toggle_pause()
-        elif key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_MINUS):
-            self.cycle_speed()
 
     def _record_trail(self):
         x, y, _ = self.sim.vehicle.pose
@@ -300,7 +314,41 @@ class App:
 
         self._draw_perception(snap)
         self._draw_car(snap)
+        self._draw_lap_counter(snap)
+        self._draw_legend()
         self.screen.set_clip(None)
+
+    def _draw_legend(self):
+        items = [(RACE, "raceline"), (LOCALP, "local path"),
+                 (CENTER, "centreline"), (BLUE, "left cone"),
+                 (YELLOW, "right cone")]
+        lh, pad, w = 18, 8, 132
+        h = pad * 2 + lh * len(items)
+        x0 = MAP_RECT.x + 12
+        y0 = MAP_RECT.bottom - h - 12
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((22, 25, 32, 215))
+        self.screen.blit(panel, (x0, y0))
+        pygame.draw.rect(self.screen, (70, 75, 90),
+                         pygame.Rect(x0, y0, w, h), width=1, border_radius=6)
+        for i, (col, label) in enumerate(items):
+            cy = y0 + pad + i * lh + lh // 2
+            if "cone" in label:
+                pygame.draw.circle(self.screen, col, (x0 + 16, cy), 4)
+            else:
+                pygame.draw.line(self.screen, col, (x0 + 8, cy), (x0 + 26, cy), 3)
+            self.screen.blit(self.font_s.render(label, True, DIM),
+                             (x0 + 34, cy - 8))
+
+    def _draw_lap_counter(self, snap):
+        if snap["mission"] not in (AUTOCROSS, TRACKDRIVE) or snap["lap"] < 1:
+            return
+        txt = self.font_b.render(f"LAP {snap['lap']}", True, TEXT)
+        box = pygame.Rect(MAP_RECT.x + 12, MAP_RECT.y + 12,
+                          txt.get_width() + 24, txt.get_height() + 12)
+        pygame.draw.rect(self.screen, (24, 27, 35), box, border_radius=6)
+        pygame.draw.rect(self.screen, ACCENT, box, width=1, border_radius=6)
+        self.screen.blit(txt, (box.x + 12, box.y + 6))
 
     def _draw_grid(self):
         step = max(5.0, round(10.0))
@@ -393,7 +441,10 @@ class App:
         pygame.draw.line(self.screen, GRID, (x, y), (PANEL_RECT.right - 16, y)); y += 10
         self._row(x, y, "SPEED", f"{snap['speed']:5.1f} m/s"); y += 24
         self._row(x, y, "STEER", f"{np.degrees(snap['steer']):5.1f} deg"); y += 24
-        self._row(x, y, "LAP", f"{snap['lap']} / {snap['laps_required']}"); y += 24
+        if snap["mission"] in (AUTOCROSS, TRACKDRIVE):
+            self._row(x, y, "LAP", str(snap['lap'])); y += 24
+        else:
+            self._row(x, y, "LAP", f"{snap['lap']} / {snap['laps_required']}"); y += 24
         self._row(x, y, "MAP CONES", str(snap['map_left'].shape[0] + snap['map_right'].shape[0])); y += 24
         self._row(x, y, "SIM TIME", f"{snap['sim_time']:5.1f} s"); y += 24
         if snap["ebs_decel"] > 0.1:

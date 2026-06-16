@@ -2,16 +2,15 @@ import sys
 
 from simulation import Simulation
 from autonomous_system import AS_READY, AS_FINISHED
-from tracks import ALL_MISSIONS
+from tracks import ALL_MISSIONS, AUTOCROSS, TRACKDRIVE
+
+CONTINUOUS = (AUTOCROSS, TRACKDRIVE)
 
 TIME_BUDGET_S = {
     "acceleration": 60.0,
     "skidpad": 90.0,
     "autocross": 120.0,
     "trackdrive": 400.0,
-    "ebs_test": 60.0,
-    "inspection": 60.0,
-    "manual": 400.0,
 }
 DEFAULT_BUDGET_S = 200.0
 
@@ -32,9 +31,18 @@ def run(mission, dt=0.04):
     _arm_and_launch(sim)
 
     max_ticks = int(TIME_BUDGET_S.get(mission, DEFAULT_BUDGET_S) / dt)
+    target_laps = sim.track.laps_required
+    race_req = stop_req = False
     finished = False
     for _ in range(max_ticks):
         sim.tick()
+        if mission in CONTINUOUS:
+            if not race_req:
+                sim.request_race()
+                race_req = True
+            if not stop_req and sim.race is not None and sim.lap >= target_laps:
+                sim.request_stop()
+                stop_req = True
         if sim.AS.state == AS_FINISHED:
             finished = True
             break
