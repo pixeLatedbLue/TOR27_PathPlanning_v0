@@ -26,7 +26,7 @@ It handles all the FSD missions:
 | Mission | What happens |
 |---------|--------------|
 | **Acceleration** | Drive straight down a 75 m lane, then brake to a stop. |
-| **Skidpad** | Drive the figure of eight (right circle, then left), three warm-up laps, then one fast lap. |
+| **Skidpad** | Drive the figure of eight (right circle, then left): three warm-up laps, then fast laps that keep going until you end it. |
 | **Autocross** | Map the track in perception mode, then (on the RACE button) race the planned line. |
 | **Trackdrive** | Map in perception mode, then (on the RACE button) race lap after lap until you end it. |
 
@@ -188,6 +188,11 @@ brings the car to a stop back at the start line. **STOP** (key S) stops the car
 wherever it is. **EMERGENCY** (key E) fires the EBS, **RESET** (key R) starts
 over, and **PAUSE** (key P) freezes the view.
 
+You can also drop an **obstacle** by clicking on the track ahead of the car
+(click it again to clear it). When the car sees an obstacle in its path it
+brakes and stops; **CONTINUE** (key C) re-checks the track and starts the car
+again only if the obstacle has been cleared.
+
 Controls at a glance:
 
 | Key | Button | What it does |
@@ -198,9 +203,11 @@ Controls at a glance:
 | M | RACE | switch perception mode to race mode on the next completed lap |
 | F | END | make this the final lap and stop at the start line |
 | S | STOP | stop the car where it is |
+| C | CONTINUE | re-check the track and resume after an obstacle is cleared |
 | E | EMERGENCY | fire the EBS hard stop |
 | R | RESET | restart the current mission |
 | P | PAUSE | freeze the view |
+| click | (on the map) | drop or clear an obstacle on the track |
 
 **Run the tests:**
 
@@ -215,6 +222,31 @@ docker build -t path-planning .
 docker run --rm path-planning                 # runs every mission
 docker run --rm path-planning python -m unittest -v
 ```
+
+## Real F1 circuits (stress testing)
+
+For a harder test than the built-in tracks, the program can run on the real
+layouts of 40 Formula 1 circuits. Their centre lines come from the open
+[bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) dataset (MIT
+licensed) bundled in `assets/f1_circuits.geojson`; `f1_tracks.py` projects them
+to metres, scales them up, and builds the cone boundaries.
+
+```bash
+python f1_runner.py list           # list the circuits
+python f1_runner.py monza          # race one circuit, print clearance
+python f1_runner.py all            # run every circuit
+python app.py f1 monaco            # drive a circuit in the viewer
+```
+
+Two things this surfaced, worth knowing:
+
+- The cone-map recovery (`global_centerline`) was built for one simple loop and
+  cannot trace a long, complex circuit, so on F1 tracks the program races
+  directly on the known centre line instead of recovering it from the cones.
+- Once racing, the planner and controller handle the real layouts: all 40 run
+  end to end, and about 32 stay clear of the cones. The rest clip on their
+  tightest hairpins and chicanes (Monaco, Baku, Suzuka, Silverstone, ...), where
+  pure pursuit still cuts the corner.
 
 ## Scope (what this is and is not)
 

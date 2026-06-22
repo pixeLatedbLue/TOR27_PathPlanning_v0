@@ -33,6 +33,8 @@ py-modules = [
     "vehicle",
     "autonomous_system",
     "simulation",
+    "f1_tracks",
     "run_headless",
+    "f1_runner",
     "app",
 ]

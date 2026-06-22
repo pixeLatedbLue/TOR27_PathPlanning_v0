@@ -46,7 +46,8 @@ class Vehicle:
         ld = max(np.linalg.norm(to_target), 1e-3)
         return np.arctan2(2.0 * self.wheelbase * np.sin(alpha), ld)
 
-    def step(self, dt, path_world, target_speed, brake=False, lookahead=4.0):
+    def step(self, dt, path_world, target_speed, brake=False, lookahead=4.0,
+             max_lookahead=None):
         if brake:
             target_speed = 0.0
 
@@ -58,8 +59,9 @@ class Vehicle:
         self.v = float(np.clip(self.v, 0.0, self.max_speed))
 
         if not brake and self.v > 1e-3:
+            cap = LOOKAHEAD_MAX if max_lookahead is None else min(LOOKAHEAD_MAX, max_lookahead)
             ld = float(np.clip(lookahead + LOOKAHEAD_GAIN * self.v,
-                               LOOKAHEAD_MIN, LOOKAHEAD_MAX))
+                               LOOKAHEAD_MIN, cap))
             self.steer = float(np.clip(self._pure_pursuit(path_world, ld),
                                        -MAX_STEER, MAX_STEER))
         self.x += self.v * np.cos(self.theta) * dt

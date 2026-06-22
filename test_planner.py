@@ -190,6 +190,23 @@ class MissionTests(unittest.TestCase):
         self.assertIsNone(sim.race)
         self.assertEqual(sim.phase, "exploration")
 
+    def test_autocross_racing_stays_off_the_cones(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(AUTOCROSS)
+        self._arm_and_launch(sim)
+        sim.request_race()
+        cones = np.vstack([sim.track.left, sim.track.right])
+        worst = np.inf
+        for _ in range(9000):
+            sim.tick()
+            if sim.race is not None and sim.phase == "racing":
+                p = sim.vehicle.position
+                worst = min(worst, float(np.min(np.linalg.norm(cones - p, axis=1))))
+                if sim.lap >= 3:
+                    break
+        self.assertNotEqual(worst, np.inf)
+        self.assertGreater(worst, 0.8)
+
     def test_autocross_races_after_race_requested_then_stops(self):
         sim = Simulation(dt=0.04)
         sim.select_mission(AUTOCROSS)
@@ -248,25 +265,32 @@ class MissionTests(unittest.TestCase):
         self.assertTrue(sim.vehicle.is_stopped())
         self.assertLess(np.linalg.norm(sim.vehicle.position - start), 4.0)
 
-    def test_skidpad_runs_three_warmups_then_fast_lap(self):
+    def test_skidpad_warms_up_then_loops_fast_until_ended(self):
         sim = Simulation(dt=0.04)
         sim.select_mission(SKIDPAD)
         self._arm_and_launch(sim)
         saw_fast = False
         max_speed = 0.0
-        for _ in range(8000):
+        for _ in range(12000):
             sim.tick()
             if "FAST LAP" in sim.message:
                 saw_fast = True
             max_speed = max(max_speed, sim.vehicle.v)
+            if saw_fast and sim.lap >= 5:
+                break
+        self.assertTrue(saw_fast)
+        self.assertGreaterEqual(sim.lap, 5)
+        self.assertNotEqual(sim.AS.state, AS_FINISHED)
+        self.assertEqual(len(sim.skidpad_loops), 2)
+        self.assertTrue(all(np.all(np.isfinite(loop)) for loop in sim.skidpad_loops))
+        self.assertGreater(max_speed, 7.5)
+        sim.request_end()
+        for _ in range(8000):
+            sim.tick()
             if sim.AS.state == AS_FINISHED:
                 break
         self.assertEqual(sim.AS.state, AS_FINISHED)
-        self.assertEqual(sim.lap, 4)
-        self.assertEqual(len(sim.skidpad_loops), 2)
-        self.assertTrue(all(np.all(np.isfinite(loop)) for loop in sim.skidpad_loops))
-        self.assertTrue(saw_fast)
-        self.assertGreater(max_speed, 7.5)
+        self.assertTrue(sim.vehicle.is_stopped())
 
     def test_skidpad_stays_within_the_lane(self):
         sim = Simulation(dt=0.04)
@@ -281,9 +305,9 @@ class MissionTests(unittest.TestCase):
             off = min(abs(np.linalg.norm(p - cR) - R),
                       abs(np.linalg.norm(p - cL) - R))
             worst = max(worst, off)
-            if sim.AS.state == AS_FINISHED:
+            if sim.lap >= 5:
                 break
-        self.assertEqual(sim.AS.state, AS_FINISHED)
+        self.assertGreaterEqual(sim.lap, 5)
         self.assertLess(worst, 1.5)
 
     def test_emergency_mid_drive_stops_the_car_hard(self):
@@ -304,6 +328,53 @@ class MissionTests(unittest.TestCase):
         self.assertTrue(sim.vehicle.is_stopped())
         self.assertGreater(sim.ebs_decel, 10.0)
         self.assertLessEqual(sim.ebs_decel, EBS_DECEL + 1e-6)
+
+    def test_obstacle_stops_car_and_continue_resumes_when_cleared(self):
+        sim = Simulation(dt=0.04)
+        sim.select_mission(ACCELERATION)
+        self._arm_and_launch(sim)
+        for _ in range(200):
+            sim.tick()
+            if sim.vehicle.v > 6.0:
+                break
+        sim.set_obstacle(np.array([sim.vehicle.x + 12.0, 0.0]))
+        for _ in range(200):
+            sim.tick()
+            if sim.vehicle.is_stopped():
+                break
+        self.assertTrue(sim.vehicle.is_stopped())
+        self.assertLess(sim.vehicle.x, sim.obstacle[0])
+
+        sim.continue_drive()
+        sim.tick()
+        self.assertTrue(sim.vehicle.is_stopped())
+
+        sim.clear_obstacle()
+        sim.continue_drive()
+        for _ in range(80):
+            sim.tick()
+        self.assertGreater(sim.vehicle.v, 1.0)
+
+
+class F1Tests(unittest.TestCase):
+    def test_f1_circuit_loads_and_races(self):
+        from f1_tracks import f1_names
+        self.assertIn("Monza", f1_names())
+        sim = Simulation(dt=0.04)
+        sim.select_f1("monza")
+        self.assertIsNotNone(sim.race)
+        self.assertGreater(len(sim.track.left), 20)
+        self.assertTrue(np.all(np.isfinite(sim.race["raceline"])))
+        sim.set_asms(True)
+        for _ in range(400):
+            sim.tick()
+            if sim.AS.state == AS_READY and sim.AS.time_in_ready >= 5.0:
+                break
+        sim.press_go()
+        for _ in range(400):
+            sim.tick()
+        self.assertEqual(sim.phase, "racing")
+        self.assertGreater(sim.vehicle.v, 1.0)
 
 
 if __name__ == "__main__":

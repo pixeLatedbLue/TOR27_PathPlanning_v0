@@ -2,7 +2,8 @@ import numpy as np
 
 from centerline import global_centerline, local_centerline
 from raceline import minimum_curvature_raceline, find_apexes
-from geometry import confidence_from_metrics, curvature_along, path_metrics, speed_profile_from_curvature
+from geometry import (as_points, confidence_from_metrics, curvature_along,
+                      path_metrics, resample_loop, speed_profile_from_curvature)
 
 
 class Planner:
@@ -127,6 +128,39 @@ class Planner:
                 "optimizer_iterations": race_info["optimizer_iterations"],
             },
             "all_loops": loops,
+        }
+        self.mode = "racing"
+        return self.result
+
+    def race_from_centerline(self, centerline, left_cones, right_cones):
+        main_loop = resample_loop(as_points(centerline, "centerline", min_points=3),
+                                  self.n_points)
+        raceline, shift, race_info = minimum_curvature_raceline(
+            main_loop, left_cones, right_cones,
+            car_width=self.car_width, safety=self.safety, return_info=True)
+        curvature = curvature_along(raceline, closed=True)
+        speed_profile = speed_profile_from_curvature(
+            raceline, mu=self.mu, max_speed=self.max_speed, min_speed=self.min_speed)
+        metrics = path_metrics(raceline, closed=True)
+        confidence = confidence_from_metrics(metrics, min_width=race_info["min_half_width"])
+        self.result = {
+            "mode": "racing",
+            "centerline": main_loop,
+            "raceline": raceline,
+            "apex_indices": find_apexes(raceline),
+            "curvature": curvature,
+            "speed_profile": speed_profile,
+            "confidence": float(confidence),
+            "diagnostics": {
+                **metrics,
+                "loops": 1,
+                "min_half_width": race_info["min_half_width"],
+                "mean_half_width": race_info["mean_half_width"],
+                "optimizer_success": race_info["optimizer_success"],
+                "optimizer_message": race_info["optimizer_message"],
+                "optimizer_iterations": race_info["optimizer_iterations"],
+            },
+            "all_loops": [main_loop],
         }
         self.mode = "racing"
         return self.result

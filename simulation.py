@@ -7,7 +7,7 @@ from mapping import ConeMap
 from perception import Perception
 from planner import Planner
 from tracks import build_track, ACCELERATION, SKIDPAD, AUTOCROSS, TRACKDRIVE
-from vehicle import Vehicle
+from vehicle import Vehicle, MAX_DECEL
 
 EXPLORE_SPEED = 5.0
 SKIDPAD_SPEED = 7.0
@@ -16,7 +16,7 @@ STRAIGHT_SPEED = 16.0
 
 END_AWAY_M = 8.0
 END_NEAR_M = 5.0
-FINAL_LAP_SPEED = 7.0
+OBSTACLE_DETECT_DIST = 14.0
 
 
 def local_to_world(points_local, pose):
@@ -40,7 +40,7 @@ class Simulation:
         self.perception = Perception(self.track)
         self.cmap = ConeMap(self.track.start_pose)
         self.vehicle = Vehicle(self.track.start_pose, max_speed=STRAIGHT_SPEED)
-        self.planner = Planner(car_width=1.5, safety=0.3, max_speed=14.0,
+        self.planner = Planner(car_width=1.5, safety=0.4, max_speed=14.0,
                                min_speed=3.0)
 
         self.AS.reset()
@@ -62,13 +62,36 @@ class Simulation:
         self.ebs_decel = 0.0
         self._stop_requested = False
         self._end_requested = False
-        self._end_away = False
+        self._end_far = False
         self._end_stopping = False
         self._race_requested = False
         self._explore_away = False
         self._explore_lap = 1
-        self._end_requested = False
-        self._end_target = 0.0
+        self._skid_eight = 1
+        self.obstacle = None
+        self._obstacle_blocked = False
+        self.f1_name = None
+
+    def select_f1(self, key, extent=650.0, width=6.0):
+        from f1_tracks import load_f1
+        self.select_mission(TRACKDRIVE)
+        track = load_f1(key, extent=extent, width=width)
+        self.track = track
+        self.f1_name = getattr(track, "f1_name", key)
+        self.perception = Perception(track)
+        self.cmap = ConeMap(track.start_pose)
+        self.vehicle = Vehicle(track.start_pose, max_speed=18.0)
+        self.planner = Planner(car_width=1.5, safety=0.5, max_speed=16.0,
+                               min_speed=3.0, mu=1.0)
+        self.race = self.planner.race_from_centerline(
+            track.centerline, track.left, track.right)
+        rl = self.race["raceline"]
+        start = np.array(track.start_pose[:2])
+        self._race_start_idx = int(np.argmin(np.linalg.norm(rl - start, axis=1)))
+        self._race_seg = np.linalg.norm(np.diff(np.vstack([rl, rl[0]]), axis=0), axis=1)
+        self._prev_angle = None
+        self._race_angle = 0.0
+        self.message = f"{self.f1_name} -- ASMS ON, then GO"
 
     def set_asms(self, on):
         self.AS.set_asms(on)
@@ -85,12 +108,22 @@ class Simulation:
 
     def request_end(self):
         self._end_requested = True
-        self._end_away = False
+        self._end_far = False
         self._end_stopping = False
 
     def request_race(self):
         self._race_requested = True
         self._explore_away = False
+
+    def set_obstacle(self, world_pos):
+        self.obstacle = np.asarray(world_pos, float)
+
+    def clear_obstacle(self):
+        self.obstacle = None
+
+    def continue_drive(self):
+        if self._obstacle_blocked and not self._obstacle_ahead():
+            self._obstacle_blocked = False
 
     def reset(self):
         self.select_mission(self.mission)
@@ -130,9 +163,12 @@ class Simulation:
             self._coast_to_stop(dt)
             return
 
-        racing_loop = (self.mission in (AUTOCROSS, TRACKDRIVE)
-                       and self.race is not None)
-        end_self_handled = racing_loop or self.mission == SKIDPAD
+        if self._obstacle_blocked or self._obstacle_ahead():
+            self._obstacle_blocked = True
+            self._obstacle_brake(dt)
+            return
+
+        end_self_handled = self.mission in (AUTOCROSS, TRACKDRIVE, SKIDPAD)
         if self._end_requested and not end_self_handled:
             self._coast_to_stop(dt)
             return
@@ -149,6 +185,22 @@ class Simulation:
         self.message = f"STOPPING -- braking ({self.vehicle.v:0.1f} m/s)"
         if self.vehicle.is_stopped():
             self.mission_finished = True
+
+    def _obstacle_ahead(self):
+        if self.obstacle is None:
+            return False
+        rel = self.obstacle - self.vehicle.position
+        dist = float(np.linalg.norm(rel))
+        if dist > OBSTACLE_DETECT_DIST:
+            return False
+        if dist < 1e-6:
+            return True
+        heading = np.array([np.cos(self.vehicle.theta), np.sin(self.vehicle.theta)])
+        return float(np.dot(rel, heading) / dist) > 0.3
+
+    def _obstacle_brake(self, dt):
+        self.vehicle.step(dt, self.local_path_world, 0.0, brake=True)
+        self.message = "OBSTACLE on track -- stopped (clear it, then press CONTINUE)"
 
     def _perceive_and_map(self):
         self.detections = self.perception.sense(self.vehicle.pose)
@@ -194,67 +246,84 @@ class Simulation:
             self.vehicle.step(dt, path, STRAIGHT_SPEED)
             self.message = f"Acceleration run -- {self.vehicle.x:0.0f}/{finish_x:0.0f} m"
 
+    def _skidpad_window(self, cl):
+        n = len(cl)
+        lo = self._fixed_idx
+        seg = cl[(np.arange(lo, lo + 40) % n)]
+        nxt = (lo + int(np.argmin(
+            np.linalg.norm(seg - self.vehicle.position, axis=1)))) % n
+        wrapped = nxt < lo
+        self._fixed_idx = nxt
+        return cl[(np.arange(nxt, nxt + 30) % n)], wrapped
+
     def _drive_skidpad(self, dt):
         self.phase = "skidpad"
         cl = self.track.centerline
-        eights = self.track.laps_required
-        pts_per_eight = max(1, len(cl) // eights)
-        half = pts_per_eight // 2
+        half = len(cl) // 2
         if self.skidpad_loops is None and half >= 1:
-            self.skidpad_loops = [cl[:half], cl[half:pts_per_eight]]
+            self.skidpad_loops = [cl[:half], cl[half:]]
 
         if self._end_requested:
             self._skidpad_end(dt, cl)
             return
 
-        eight_idx = self._fixed_idx // pts_per_eight
-        fast = eight_idx >= eights - 1
+        window, wrapped = self._skidpad_window(cl)
+        if wrapped:
+            self._skid_eight += 1
+        warmups = self.track.laps_required
+        fast = self._skid_eight > warmups
         speed = SKIDPAD_FAST_SPEED if fast else SKIDPAD_SPEED
-        path, done = self._follow_fixed(cl, dt, speed)
-        self.lap = min(eights, eight_idx + 1)
+        self.vehicle.step(dt, window, speed)
+        self.lap = self._skid_eight
         if fast:
-            self.message = f"Skidpad -- FAST LAP ({self.vehicle.v:0.1f} m/s)"
+            self.message = (f"Skidpad -- FAST LAP {self._skid_eight}  "
+                            f"({self.vehicle.v:0.1f} m/s)  [STOP / END]")
         else:
-            self.message = f"Skidpad -- warm-up figure-8 {self.lap}/{eights - 1}"
-        if done:
-            self.vehicle.step(dt, path, 0.0)
-            if self.vehicle.is_stopped():
-                self.mission_finished = True
+            self.message = (f"Skidpad -- warm-up figure-8 "
+                            f"{self._skid_eight}/{warmups}  [STOP / END]")
 
     def _skidpad_end(self, dt, cl):
-        start = np.array(self.track.start_pose[:2])
-        dist = float(np.linalg.norm(self.vehicle.position - start))
-        if dist > END_AWAY_M:
-            self._end_away = True
-        if self._end_away and dist < END_NEAR_M:
+        window, _ = self._skidpad_window(cl)
+        seg = np.linalg.norm(np.diff(np.vstack([cl, cl[0]]), axis=0), axis=1)
+        rem = self._arc_forward(seg, self._fixed_idx, 0)
+        bd = self._brake_distance()
+        if rem > bd + 5.0:
+            self._end_far = True
+        if self._end_far and rem <= bd:
             self._end_stopping = True
-
-        lo = self._fixed_idx
-        seg = cl[lo:min(len(cl), lo + 40)]
-        self._fixed_idx = lo + int(np.argmin(
-            np.linalg.norm(seg - self.vehicle.position, axis=1)))
-        window = cl[self._fixed_idx:self._fixed_idx + 30]
-        if len(window) < 2:
-            window = cl[-30:]
-
         if self._end_stopping:
             self.vehicle.step(dt, window, 0.0)
-            self.message = f"FINAL LAP -- stopping at start ({self.vehicle.v:0.1f} m/s)"
+            self.message = f"FINAL LAP -- braking to start ({self.vehicle.v:0.1f} m/s)"
             if self.vehicle.is_stopped():
                 self.mission_finished = True
         else:
-            self.vehicle.step(dt, window, min(SKIDPAD_SPEED, FINAL_LAP_SPEED))
-            self.message = "FINAL LAP -- returning to start"
+            fast = self._skid_eight > self.track.laps_required
+            self.vehicle.step(dt, window, SKIDPAD_FAST_SPEED if fast else SKIDPAD_SPEED)
+            self.message = "FINAL LAP -- driving to start"
 
     def _drive_loop(self, dt):
         if self.race is None:
             self.phase = "exploration"
             path, plan = self._explore_path()
-            self.vehicle.step(dt, path, EXPLORE_SPEED)
             start = np.array(self.track.start_pose[:2])
             dist = float(np.linalg.norm(self.vehicle.position - start))
             if dist > END_AWAY_M:
                 self._explore_away = True
+
+            if self._end_requested:
+                if self._explore_away and dist <= self._brake_distance() + 1.0:
+                    self._end_stopping = True
+                if self._end_stopping:
+                    self.vehicle.step(dt, path, 0.0)
+                    self.message = f"ENDING -- stopping at start ({self.vehicle.v:0.1f} m/s)"
+                    if self.vehicle.is_stopped():
+                        self.mission_finished = True
+                else:
+                    self.vehicle.step(dt, path, EXPLORE_SPEED)
+                    self.message = "FINAL LAP -- returning to start (perception)"
+                return
+
+            self.vehicle.step(dt, path, EXPLORE_SPEED)
             lap_done = self._explore_away and dist < END_NEAR_M
             if lap_done:
                 self._explore_away = False
@@ -278,9 +347,33 @@ class Simulation:
         except ValueError as exc:
             self.message = f"Mapping failed: {exc}"
             return
+        rl = self.race["raceline"]
+        start = np.array(self.track.start_pose[:2])
+        self._race_start_idx = int(np.argmin(np.linalg.norm(rl - start, axis=1)))
+        self._race_seg = np.linalg.norm(np.diff(np.vstack([rl, rl[0]]), axis=0), axis=1)
         self._prev_angle = None
         self._race_angle = 0.0
         self.message = "MAP COMPLETE -- racing line ready"
+
+    @staticmethod
+    def _arc_forward(seg, i, j):
+        n = len(seg)
+        i %= n
+        j %= n
+        if j == i:
+            return 0.0
+        if j > i:
+            return float(seg[i:j].sum())
+        return float(seg[i:].sum() + seg[:j].sum())
+
+    def _brake_distance(self):
+        return self.vehicle.v ** 2 / (2.0 * MAX_DECEL) + 1.5
+
+    def _race_lookahead(self, i0):
+        curv = self.race["curvature"]
+        n = len(curv)
+        kappa = float(np.max(curv[np.arange(i0, i0 + 16) % n]))
+        return max(2.0, 0.7 / max(kappa, 1e-3))
 
     def _race_lap(self, dt):
         raceline = self.race["raceline"]
@@ -291,27 +384,29 @@ class Simulation:
         n = len(raceline)
         window = np.vstack([raceline, raceline])[i0:i0 + max(20, n // 6)]
         self.local_path_world = window
+        la = self._race_lookahead(i0)
 
         if self._end_requested:
-            start = np.array(self.track.start_pose[:2])
-            dist = float(np.linalg.norm(self.vehicle.position - start))
-            if dist > END_AWAY_M:
-                self._end_away = True
-            if self._end_away and dist < END_NEAR_M:
+            rem = self._arc_forward(self._race_seg, i0, self._race_start_idx)
+            bd = self._brake_distance()
+            if rem > bd + 5.0:
+                self._end_far = True
+            if self._end_far and rem <= bd:
                 self._end_stopping = True
             if self._end_stopping:
-                self.vehicle.step(dt, window, 0.0)
+                self.vehicle.step(dt, window, 0.0, max_lookahead=la)
                 self._count_laps(raceline)
-                self.message = f"FINAL LAP -- stopping at start ({self.vehicle.v:0.1f} m/s)"
+                self.message = f"FINAL LAP -- braking to start ({self.vehicle.v:0.1f} m/s)"
                 if self.vehicle.is_stopped():
                     self.mission_finished = True
                 return
-            self.vehicle.step(dt, window, min(target_speed, FINAL_LAP_SPEED))
+            self.vehicle.step(dt, window, target_speed, max_lookahead=la)
             self._count_laps(raceline)
-            self.message = f"FINAL LAP {self.lap} -- returning to start"
+            self.message = (f"FINAL LAP {self.lap} -- racing to start "
+                            f"({target_speed:0.1f} m/s)")
             return
 
-        self.vehicle.step(dt, window, target_speed)
+        self.vehicle.step(dt, window, target_speed, max_lookahead=la)
         self._count_laps(raceline)
         self.message = (f"RACING -- lap {self.lap}  ({target_speed:0.1f} m/s)"
                         f"  [STOP / END]")
@@ -339,19 +434,6 @@ class Simulation:
         if self.vehicle.is_stopped():
             self.message = "AS EMERGENCY -- safe state (standstill, SDC open)"
 
-    def _follow_fixed(self, line, dt, speed):
-        p = self.vehicle.position
-        lo = self._fixed_idx
-        hi = min(len(line), lo + 40)
-        seg = line[lo:hi]
-        rel = np.linalg.norm(seg - p, axis=1)
-        self._fixed_idx = lo + int(np.argmin(rel))
-        window = line[self._fixed_idx:self._fixed_idx + 30]
-        done = self._fixed_idx >= len(line) - 3
-        if not done:
-            self.vehicle.step(dt, window, speed)
-        return window, done
-
     def snapshot(self):
         left, right = Perception.split(self.detections)
         return {
@@ -378,4 +460,6 @@ class Simulation:
             "ebs_decel": self.ebs_decel,
             "ready_t": self.AS.time_in_ready,
             "driving_t": self.AS.time_in_driving,
+            "obstacle": self.obstacle,
+            "obstacle_blocked": self._obstacle_blocked,
         }

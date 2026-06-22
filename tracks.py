@@ -67,20 +67,19 @@ def _skidpad(lane=3.0):
     right_circle = arc(+cx, np.pi, -1.0, 120)
     left_circle = arc(-cx, 0.0, 1.0, 120)
     figure_eight = np.vstack([right_circle, left_circle])
-    center = np.vstack([figure_eight] * 4)
     return Track(SKIDPAD, blue, yellow, start_pose=(0.0, 0.0, np.pi / 2),
-                 centerline=center, closed=False, laps_required=4,
+                 centerline=figure_eight, closed=False, laps_required=3,
                  length=2 * np.pi * r_drive)
 
 
-def _loop_centerline(n=220, seed=7):
+def _loop_centerline(n=260, seed=7):
     t = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
-    rx = 34.0 + 6.0 * np.sin(2 * t)
-    ry = 24.0 + 5.0 * np.cos(2 * t)
+    rx = 36.0 + 5.0 * np.sin(2 * t) + 2.0 * np.cos(3 * t) + 1.2 * np.sin(4 * t)
+    ry = 26.0 + 4.0 * np.cos(2 * t) + 1.8 * np.sin(3 * t) + 0.8 * np.cos(4 * t)
     return np.column_stack([rx * np.cos(t), ry * np.sin(t)])
 
 
-def _closed_loop(mission, laps_required, width=3.5, cone_spacing=4.5):
+def _closed_loop(mission, laps_required, width=3.7, cone_spacing=4.5):
     center = _loop_centerline()
     left_dense, right_dense = _offset_boundaries(center, width)
     left = _resample_closed(left_dense, cone_spacing)
